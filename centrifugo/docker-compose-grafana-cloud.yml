@@ -1,0 +1,27 @@
+version: '3.7'
+
+services:
+  k6:
+    image: loadimpact/k6:latest
+    hostname: k6
+    container_name: stress_k6
+    networks:
+      - centrifugal
+    ports:
+      - "6565:6565"
+    depends_on:
+      - telegraf
+    volumes:
+      - ./tests:/scripts
+
+  telegraf:
+    image: telegraf:1.18.2-alpine
+    ports:
+      - 8186:8186
+    networks:
+      - centrifugal
+    volumes:
+      - ./config/telegraf.conf:/etc/telegraf/telegraf.conf
+
+networks:
+  centrifugal:
