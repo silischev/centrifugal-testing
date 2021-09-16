@@ -5,12 +5,22 @@ services:
     image: loadimpact/k6:latest
     hostname: k6
     container_name: stress_k6
-    networks:
-      - centrifugal
+    depends_on:
+      - centrifugo
     ports:
       - "6565:6565"
     volumes:
       - ./tests:/scripts
 
-networks:
-  centrifugal:
+  centrifugo:
+    container_name: centrifugo
+    image: centrifugo/centrifugo:latest
+    volumes:
+      - ./config/config.json:/centrifugo/config.json
+    command: centrifugo -c config.json
+    ports:
+      - 8000:8000
+#    ulimits:
+#      nofile:
+#        soft: 65535
+#        hard: 65535

@@ -5,11 +5,10 @@ services:
     image: loadimpact/k6:latest
     hostname: k6
     container_name: stress_k6
-    networks:
-      - centrifugal
     ports:
       - "6565:6565"
     depends_on:
+      - centrifugo
       - telegraf
     volumes:
       - ./tests:/scripts
@@ -18,10 +17,18 @@ services:
     image: telegraf:1.18.2-alpine
     ports:
       - 8186:8186
-    networks:
-      - centrifugal
     volumes:
       - ./config/telegraf.conf:/etc/telegraf/telegraf.conf
 
-networks:
-  centrifugal:
+  centrifugo:
+    container_name: centrifugo
+    image: centrifugo/centrifugo:latest
+    volumes:
+      - ./config/config.json:/centrifugo/config.json
+    command: centrifugo -c config.json
+    ports:
+      - 8000:8000
+  #    ulimits:
+  #      nofile:
+  #        soft: 65535
+  #        hard: 65535

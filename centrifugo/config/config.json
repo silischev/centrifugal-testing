@@ -1,0 +1,25 @@
+{
+    "allowed_origins": ["*"],
+    "admin": true,
+    "admin_password": "test",
+    "admin_secret": "test",
+    "history_size": 1000,
+    "history_ttl": "1000s",
+    "history_lifetime": 3000,
+    "client_anonymous": true,
+    "anonymous": true,
+    "publish": true,
+    "namespaces": [
+        {
+            "name": "chat",
+            "publish": true,
+            "anonymous": true,
+            "subscribe_to_publish": true,
+            "history_size": 1000,
+            "history_ttl": "1000s",
+            "history_lifetime": 3000,
+            "history_recover": true,
+            "recover": true
+        }
+    ]
+}
