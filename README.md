@@ -1,5 +1,10 @@
 # centrifugal-testing
-Load testing and benchmarking centrifugal ecosystem components
+Load testing and benchmarking centrifugal ecosystem components with k6 load testing tool (https://k6.io/docs/)
+
+### Local running
+```bash
+make run_centrifugo_local
+```
 
 ### Setup sending k6 metrics into Grafana Cloud
 1) ```bash
@@ -10,5 +15,5 @@ Write url, username, password based on your Grafana Cloud Prometheus settings.
 For more information see https://k6.io/docs/results-visualization/grafana-cloud/
 3) Run testing:
 ```bash
-   make run_centrifugo_grafana_cloud
-   ```
+make run_centrifugo_grafana_cloud
+```
