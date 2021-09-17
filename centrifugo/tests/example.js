@@ -2,8 +2,8 @@ import { check, sleep } from 'k6';
 import ws from "k6/ws";
 
 export let options = {
-    vus: 2,
-    duration: '1s',
+    vus: 100,
+    duration: '50s',
 };
 
 let channel = 'chat';
@@ -27,7 +27,7 @@ export default function () {
 
         socket.setTimeout(function () {
             socket.close();
-        }, 1500);
+        }, 55000);
     });
 
     check(res, { 'status is 101': (r) => r && r.status === 101 });

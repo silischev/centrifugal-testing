@@ -1,4 +1,5 @@
 {
+    "prometheus": true,
     "allowed_origins": ["*"],
     "admin": true,
     "admin_password": "test",
