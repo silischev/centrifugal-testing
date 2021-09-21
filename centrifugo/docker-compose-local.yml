@@ -9,26 +9,48 @@ services:
       - centrifugo
       - prometheus
       - grafana
+      - cadvisor
     ports:
       - 6565:6565
     volumes:
       - ./tests:/scripts
 
   centrifugo:
-    container_name: centrifugo
     image: centrifugo/centrifugo:latest
+    container_name: centrifugo
     volumes:
       - ./config/centrifugo.json:/centrifugo/config.json
     command: centrifugo -c config.json
     ports:
       - 8000:8000
+    depends_on:
+      - prometheus
+      - grafana
+      - cadvisor
 #    ulimits:
 #      nofile:
 #        soft: 65535
 #        hard: 65535
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '2'
+
+  cadvisor:
+    image: gcr.io/google-containers/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - 8080:8080
+    volumes:
+      - /:/rootfs:ro
+      #- /var/run:/var/run/:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
 
   prometheus:
     image: prom/prometheus:latest
+    container_name: prometheus
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
