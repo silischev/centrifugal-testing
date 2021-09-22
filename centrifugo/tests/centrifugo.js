@@ -8,7 +8,7 @@ export let options = {
         contacts: {
             executor: 'constant-vus',
             vus: 1000,
-            duration: '10s',
+            duration: '20s',
             gracefulStop: '10s',
         },
     }
@@ -39,7 +39,7 @@ export default function () {
 
         socket.setTimeout(function () {
             socket.close();
-        }, 15000);
+        }, 25000);
     });
 
     //check(res, { 'status is 101': (r) => r && r.status === 101 });

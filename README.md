@@ -6,7 +6,7 @@ Load testing and benchmarking centrifugal ecosystem components with k6 load test
 make run_centrifugo_local
 ```
 
-See dashboard in grafana http://127.0.0.1:3000/d/C66HRCI7k/centrifugo
+See dashboard in grafana http://127.0.0.1:3000/d/JQwvpZOMz/centrifugo
 
 ### Setup sending k6 metrics into Grafana Cloud
 1) ```bash
