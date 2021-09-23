@@ -1,19 +1,19 @@
 version: '3.7'
 
 services:
-  tests:
-    image: golang:1.17-alpine
-    container_name: tests
-    volumes:
-      - ./tests:/tests
-    env_file:
-      - .env
-    tty: true
+  k6:
+    image: loadimpact/k6:latest
+    hostname: k6
+    container_name: k6
     depends_on:
+      - centrifugo
       - prometheus
       - grafana
       - cadvisor
-    working_dir: /tests
+    ports:
+      - 6565:6565
+    volumes:
+      - ./tests/k6:/scripts
 
   centrifugo:
     image: centrifugo/centrifugo:latest
@@ -23,6 +23,10 @@ services:
     command: centrifugo -c config.json
     ports:
       - 8000:8000
+    depends_on:
+      - prometheus
+      - grafana
+      - cadvisor
 #    ulimits:
 #      nofile:
 #        soft: 65535

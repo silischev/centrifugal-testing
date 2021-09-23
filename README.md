@@ -1,12 +1,19 @@
 # centrifugal-testing
-Load testing and benchmarking centrifugal ecosystem components with k6 load testing tool (https://k6.io/docs/)
+Load testing and benchmarking centrifugal ecosystem components
 
 ### Local running
 ```bash
+cp centrifugo/.env.example centrifugo/.env 
 make run_centrifugo_local
 ```
 
-See dashboard in grafana http://127.0.0.1:3000/d/JQwvpZOMz/centrifugo
+### Local running with k6 load testing tool (https://k6.io/docs/)
+```bash
+make run_centrifugo_local_k6
+```
+
+### Grafana dashboard
+http://127.0.0.1:3000/d/JQwvpZOMz/centrifugo
 
 ### Setup sending k6 metrics into Grafana Cloud
 1) ```bash

@@ -1,7 +1,3 @@
-// This code is an adapted version of Nats benchmarking suite from
-// https://github.com/nats-io/go-nats/blob/master/examples/nats-bench.go
-// for Centrifuge. Use together with benchmark program from Centrifuge repo:
-// https://github.com/centrifugal/centrifuge/blob/master/examples/benchmark/main.go
 package main
 
 import (
@@ -11,71 +7,103 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/centrifugal/centrifuge-go"
+	"github.com/golang-jwt/jwt"
 )
 
-// Some sane defaults.
-const (
-	DefaultNumMsg      = 100000
-	DefaultNumPubs     = 1
-	DefaultNumSubs     = 0
-	DefaultMessageSize = 128
-)
-
-func usage() {
-	log.Fatalf("Usage: benchmark [-s uri] [-np NUM_PUBLISHERS] [-ns NUM_SUBSCRIBERS] [-n NUM_MSGS] [-ms MESSAGE_SIZE] [-p] <channel>\n")
-}
-
-var url = flag.String("s", "ws://localhost:8000/connection/websocket", "Connection URI")
-var useProtobuf = flag.Bool("p", false, "Use protobuf format")
-var numPubs = flag.Int("np", DefaultNumPubs, "Number of Concurrent Publishers")
-var numSubs = flag.Int("ns", DefaultNumSubs, "Number of Concurrent Subscribers")
-var numMsg = flag.Int("n", DefaultNumMsg, "Number of Messages to Publish")
-var msgSize = flag.Int("ms", DefaultMessageSize, "Size of the message")
+const tokenHmacSecret = "test" // see config centrifugo.json
 
 var benchmark *Benchmark
 
+type config struct {
+	url     string // connection URI
+	format  string // message format
+	channel string // channel
+	numPubs int    // number of Messages to Publish
+	numSubs int    // number of Concurrent Subscribers
+	numMsg  int    // number of Concurrent Publishers
+	msgSize int    // size of the message
+}
+
+func getConfig() config {
+	url := os.Getenv("URL")
+	if len(url) == 0 {
+		url = "ws://localhost:8000/connection/websocket"
+	}
+
+	format := os.Getenv("MESSAGE_FORMAT")
+	if len(format) == 0 {
+		format = "json"
+	}
+
+	channel := os.Getenv("CHANNEL_NAME")
+	if len(channel) == 0 {
+		channel = "channel"
+	}
+
+	numPubs, _ := strconv.Atoi(os.Getenv("PUBLISHERS_NUMBER"))
+	if numPubs <= 0 {
+		numPubs = 1
+	}
+
+	numSubs, _ := strconv.Atoi(os.Getenv("SUBSCRIBERS_NUMBER"))
+	if numSubs <= 0 {
+		numSubs = 0
+	}
+
+	numMsg, _ := strconv.Atoi(os.Getenv("PUBLISH_MESSAGES_NUMBER"))
+	if numMsg <= 0 {
+		numMsg = 100000
+	}
+
+	msgSize, _ := strconv.Atoi(os.Getenv("MESSAGE_SIZE"))
+	if msgSize <= 0 {
+		msgSize = 128
+	}
+
+	return config{
+		url:     url,
+		format:  format,
+		channel: channel,
+		numPubs: numPubs,
+		numSubs: numSubs,
+		numMsg:  numMsg,
+		msgSize: msgSize,
+	}
+}
+
 func main() {
-
 	log.SetFlags(0)
-	flag.Usage = usage
-	flag.Parse()
 
-	args := flag.Args()
-	if len(args) != 1 {
-		usage()
-	}
+	cfg := getConfig()
 
-	if *numMsg <= 0 {
-		log.Fatal("Number of messages should be greater than zero.")
-	}
-
-	benchmark = NewBenchmark("Centrifuge", *numSubs, *numPubs)
+	benchmark = NewBenchmark("Centrifuge", cfg.numSubs, cfg.numPubs)
 
 	var startWg sync.WaitGroup
 	var doneWg sync.WaitGroup
 
-	doneWg.Add(*numPubs + *numSubs)
+	doneWg.Add(cfg.numPubs + cfg.numSubs)
 
 	// Run Subscribers first
-	startWg.Add(*numSubs)
-	for i := 0; i < *numSubs; i++ {
-		go runSubscriber(&startWg, &doneWg, *numMsg, *msgSize)
+	startWg.Add(cfg.numSubs)
+	for i := 0; i < cfg.numSubs; i++ {
+		go runSubscriber(&startWg, &doneWg, cfg)
 	}
 	startWg.Wait()
 
 	// Now Publishers
-	startWg.Add(*numPubs)
-	pubCounts := MsgPerClient(*numMsg, *numPubs)
-	for i := 0; i < *numPubs; i++ {
-		go runPublisher(&startWg, &doneWg, pubCounts[i], *msgSize)
+	startWg.Add(cfg.numPubs)
+	pubCounts := MsgPerClient(cfg.numMsg, cfg.numPubs)
+	for i := 0; i < cfg.numPubs; i++ {
+		go runPublisher(&startWg, &doneWg, pubCounts[i], cfg)
 	}
 
-	log.Printf("Starting benchmark [msgs=%d, msgsize=%d, pubs=%d, subs=%d]\n", *numMsg, *msgSize, *numPubs, *numSubs)
+	log.Printf("Starting benchmark [msgs=%d, msgsize=%d, pubs=%d, subs=%d]\n", cfg.numMsg, cfg.msgSize, cfg.numPubs, cfg.numSubs)
 
 	startWg.Wait()
 	doneWg.Wait()
@@ -85,13 +113,15 @@ func main() {
 	fmt.Print(benchmark.Report())
 }
 
-func newConnection() *centrifuge.Client {
+func newConnection(cfg config) *centrifuge.Client {
 	var c *centrifuge.Client
-	if *useProtobuf {
-		c = centrifuge.NewProtobufClient(*url, centrifuge.DefaultConfig())
+	if cfg.format == "protobuf" {
+		c = centrifuge.NewProtobufClient(cfg.url, centrifuge.DefaultConfig())
 	} else {
-		c = centrifuge.NewJsonClient(*url, centrifuge.DefaultConfig())
+		c = centrifuge.NewJsonClient(cfg.url, centrifuge.DefaultConfig())
 	}
+
+	c.SetToken(connToken("49", 0))
 
 	events := &eventHandler{}
 	c.OnError(events)
@@ -109,15 +139,16 @@ func (h *eventHandler) OnDisconnect(_ *centrifuge.Client, e centrifuge.Disconnec
 	}
 }
 
-func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, msgSize int) {
-	c := newConnection()
+func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
+	c := newConnection(cfg)
 	defer func() { _ = c.Close() }()
 
 	args := flag.Args()
 	subj := args[0]
 	var msg []byte
-	if msgSize > 0 {
-		msg = make([]byte, msgSize)
+	if cfg.msgSize > 0 {
+		log.Fatalln(cfg.msgSize)
+		msg = make([]byte, cfg.msgSize)
 	}
 
 	payload, _ := json.Marshal(string(msg))
@@ -138,7 +169,7 @@ func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, msgSize int) {
 		}
 	}
 
-	benchmark.AddPubSample(NewSample(numMsg, msgSize, start, time.Now()))
+	benchmark.AddPubSample(NewSample(numMsg, cfg.msgSize, start, time.Now()))
 	doneWg.Done()
 }
 
@@ -169,22 +200,18 @@ func (h *subEventHandler) OnSubscribeError(_ *centrifuge.Subscription, e centrif
 	log.Fatalf("subscribe error: %v", e.Error)
 }
 
-func runSubscriber(startWg, doneWg *sync.WaitGroup, numMsg int, msgSize int) {
-	c := newConnection()
-
-	args := flag.Args()
-	subj := args[0]
-
+func runSubscriber(startWg, doneWg *sync.WaitGroup, cfg config) {
+	c := newConnection(cfg)
 	subEvents := &subEventHandler{
-		numMsg:  numMsg,
-		msgSize: msgSize,
+		numMsg:  cfg.numMsg,
+		msgSize: cfg.msgSize,
 		doneWg:  doneWg,
 		startWg: startWg,
 		client:  c,
 		start:   time.Now(),
 	}
 
-	sub, err := c.NewSubscription(subj)
+	sub, err := c.NewSubscription(cfg.channel)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -510,4 +537,18 @@ func MsgPerClient(numMsg, numClients int) []int {
 		counts[i]++
 	}
 	return counts
+}
+
+func connToken(user string, exp int64) string {
+	// NOTE that JWT must be generated on backend side of your application!
+	// Here we are generating it on client side only for example simplicity.
+	claims := jwt.MapClaims{"sub": user}
+	if exp > 0 {
+		claims["exp"] = exp
+	}
+	t, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(tokenHmacSecret))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	return t
 }
