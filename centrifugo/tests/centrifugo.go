@@ -3,13 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/centrifugal/centrifuge-go"
@@ -19,15 +19,24 @@ import (
 const tokenHmacSecret = "test" // see config centrifugo.json
 
 var benchmark *Benchmark
+var userID uint64
+var (
+	Reset = "\033[0m"
+	Green = "\033[32m"
+	Blue  = "\033[34m"
+	Cyan  = "\033[36m"
+)
 
 type config struct {
-	url     string // connection URI
-	format  string // message format
-	channel string // channel
-	numPubs int    // number of Messages to Publish
-	numSubs int    // number of Concurrent Subscribers
-	numMsg  int    // number of Concurrent Publishers
-	msgSize int    // size of the message
+	url          string        // connection URI
+	format       string        // message format
+	channel      string        // channel
+	numPubs      int           // number of Messages to Publish
+	numSubs      int           // number of Concurrent Subscribers
+	numMsg       int           // number of Concurrent Publishers
+	msgSize      int           // size of the message
+	publishDelay time.Duration // delay before message publish (millisecond)
+	clientsDelay time.Duration // delay before new client connect (millisecond)
 }
 
 func getConfig() config {
@@ -66,22 +75,24 @@ func getConfig() config {
 		msgSize = 128
 	}
 
+	pubDelay, _ := strconv.Atoi(os.Getenv("PUBLISH_DELAY_MILLISECOND"))
+	connDelay, _ := strconv.Atoi(os.Getenv("CLIENTS_CONNECTION_DELAY_MILLISECOND"))
+
 	return config{
-		url:     url,
-		format:  format,
-		channel: channel,
-		numPubs: numPubs,
-		numSubs: numSubs,
-		numMsg:  numMsg,
-		msgSize: msgSize,
+		url:          url,
+		format:       format,
+		channel:      channel,
+		numPubs:      numPubs,
+		numSubs:      numSubs,
+		numMsg:       numMsg,
+		publishDelay: time.Duration(pubDelay) * time.Millisecond,
+		clientsDelay: time.Duration(connDelay) * time.Millisecond,
 	}
 }
 
 func main() {
 	log.SetFlags(0)
-
 	cfg := getConfig()
-
 	benchmark = NewBenchmark("Centrifuge", cfg.numSubs, cfg.numPubs)
 
 	var startWg sync.WaitGroup
@@ -92,6 +103,7 @@ func main() {
 	// Run Subscribers first
 	startWg.Add(cfg.numSubs)
 	for i := 0; i < cfg.numSubs; i++ {
+		time.Sleep(cfg.clientsDelay)
 		go runSubscriber(&startWg, &doneWg, cfg)
 	}
 	startWg.Wait()
@@ -103,7 +115,7 @@ func main() {
 		go runPublisher(&startWg, &doneWg, pubCounts[i], cfg)
 	}
 
-	log.Printf("Starting benchmark [msgs=%d, msgsize=%d, pubs=%d, subs=%d]\n", cfg.numMsg, cfg.msgSize, cfg.numPubs, cfg.numSubs)
+	log.Printf(Green+"Starting benchmark [format=%s, msgs=%d, msgsize=%d, pubs=%d, subs=%d]"+Reset+"\n", cfg.format, cfg.numMsg, cfg.msgSize, cfg.numPubs, cfg.numSubs)
 
 	startWg.Wait()
 	doneWg.Wait()
@@ -121,7 +133,8 @@ func newConnection(cfg config) *centrifuge.Client {
 		c = centrifuge.NewJsonClient(cfg.url, centrifuge.DefaultConfig())
 	}
 
-	c.SetToken(connToken("49", 0))
+	id := atomic.AddUint64(&userID, 1)
+	c.SetToken(connToken(strconv.FormatUint(id, 10), 0))
 
 	events := &eventHandler{}
 	c.OnError(events)
@@ -143,11 +156,8 @@ func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
 	c := newConnection(cfg)
 	defer func() { _ = c.Close() }()
 
-	args := flag.Args()
-	subj := args[0]
 	var msg []byte
 	if cfg.msgSize > 0 {
-		log.Fatalln(cfg.msgSize)
 		msg = make([]byte, cfg.msgSize)
 	}
 
@@ -163,7 +173,8 @@ func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
 	startWg.Done()
 
 	for i := 0; i < numMsg; i++ {
-		_, err := c.Publish(subj, payload)
+		time.Sleep(cfg.publishDelay)
+		_, err := c.Publish(cfg.channel, payload)
 		if err != nil {
 			log.Fatalf("error publish: %v", err)
 		}
@@ -253,6 +264,7 @@ type Benchmark struct {
 	Subs       *SampleGroup
 	subChannel chan *Sample
 	pubChannel chan *Sample
+	start      time.Time
 }
 
 // NewBenchmark initializes a Benchmark. After creating a bench call AddSubSample/AddPubSample.
@@ -263,6 +275,7 @@ func NewBenchmark(name string, subCnt, pubCnt int) *Benchmark {
 	bm.Pubs = NewSampleGroup()
 	bm.subChannel = make(chan *Sample, subCnt)
 	bm.pubChannel = make(chan *Sample, pubCnt)
+	bm.start = time.Now()
 	return &bm
 }
 
@@ -444,11 +457,11 @@ func (bm *Benchmark) Report() string {
 	}
 
 	if bm.Pubs.HasSamples() && bm.Subs.HasSamples() {
-		buffer.WriteString(fmt.Sprintf("%s Pub/Sub stats: %s\n", bm.Name, bm))
+		buffer.WriteString(fmt.Sprintf(Blue+"%s Pub/Sub stats: %s"+Reset+"\n", bm.Name, bm))
 		indent += " "
 	}
 	if bm.Pubs.HasSamples() {
-		buffer.WriteString(fmt.Sprintf("%sPub stats: %s\n", indent, bm.Pubs))
+		buffer.WriteString(fmt.Sprintf(Cyan+"%sPub stats: %s"+Reset+"\n", indent, bm.Pubs))
 		if len(bm.Pubs.Samples) > 1 {
 			for i, stat := range bm.Pubs.Samples {
 				buffer.WriteString(fmt.Sprintf("%s [%d] %v (%d msgs)\n", indent, i+1, stat, stat.JobMsgCnt))
@@ -458,7 +471,7 @@ func (bm *Benchmark) Report() string {
 	}
 
 	if bm.Subs.HasSamples() {
-		buffer.WriteString(fmt.Sprintf("%sSub stats: %s\n", indent, bm.Subs))
+		buffer.WriteString(fmt.Sprintf(Cyan+"%sSub stats: %s"+Reset+"\n", indent, bm.Subs))
 		if len(bm.Subs.Samples) > 1 {
 			for i, stat := range bm.Subs.Samples {
 				buffer.WriteString(fmt.Sprintf("%s [%d] %v (%d msgs)\n", indent, i+1, stat, stat.JobMsgCnt))
@@ -466,6 +479,9 @@ func (bm *Benchmark) Report() string {
 			buffer.WriteString(fmt.Sprintf("%s %s\n", indent, bm.Subs.Statistics()))
 		}
 	}
+
+	buffer.WriteString(fmt.Sprintf(Green+"testing duration:"+Reset+" %f[sec]\n", time.Since(bm.start).Seconds()))
+
 	return buffer.String()
 }
 
