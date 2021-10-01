@@ -22,7 +22,7 @@
   "editable": true,
   "gnetId": 13039,
   "graphTooltip": 0,
-  "iteration": 1632325528563,
+  "iteration": 1632484135384,
   "links": [],
   "panels": [
     {
@@ -151,7 +151,7 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
-        "orientation": "auto",
+        "orientation": "vertical",
         "reduceOptions": {
           "calcs": [
             "mean"
@@ -165,11 +165,21 @@
       "pluginVersion": "8.1.4",
       "targets": [
         {
+          "exemplar": true,
           "expr": " sum(centrifugo_node_num_clients{instance=~\"$instance\"})",
           "instant": true,
           "interval": "",
-          "legendFormat": "-",
+          "legendFormat": "clients",
           "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": " sum(centrifugo_node_num_users{instance=~\"$instance\"})",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "users",
+          "refId": "B"
         }
       ],
       "timeFrom": null,
@@ -2755,9 +2765,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "0.5",
-          "value": "0.5"
+          "selected": false,
+          "text": "0.999",
+          "value": "0.999"
         },
         "description": null,
         "error": null,
@@ -2768,7 +2778,7 @@
         "name": "quantile",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "0.5",
             "value": "0.5"
           },
@@ -2778,7 +2788,7 @@
             "value": "0.99"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "0.999",
             "value": "0.999"
           }
@@ -2821,10 +2831,9 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "3.0.1",
+          "value": "3.0.1"
         },
         "datasource": "Prometheus",
         "definition": "label_values(centrifugo_node_build,  version)",
