@@ -5,8 +5,7 @@ run_centrifugo_local_stress:
 
 run_centrifugo_local_load:
 	docker-compose -f centrifugo/docker-compose-local.yml up -d
-	docker-compose -f centrifugo/docker-compose-local.yml exec tests go run load.go
-	#docker-compose -f centrifugo/docker-compose-local.yml down -v
+	docker-compose -f centrifugo/docker-compose-local.yml exec tests go run ./load/main.go
 
 run_centrifugo_local_k6:
 	docker-compose -f centrifugo/docker-compose-local-k6.yml run k6 run /scripts/centrifugo.js

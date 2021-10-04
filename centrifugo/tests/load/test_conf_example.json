@@ -1,0 +1,6 @@
+{
+  "url": "ws://centrifugo:8000/connection/websocket",
+  "message_format": "json",
+  "clients_connections_number": 10050,
+  "subscriber_delay_millisecond": 50
+}

@@ -8,18 +8,14 @@ import (
 	"math"
 	"strconv"
 	"sync"
-	"sync/atomic"
+	"tests/common"
 	"time"
 
 	"github.com/FZambia/viper-lite"
 	"github.com/centrifugal/centrifuge-go"
-	"github.com/golang-jwt/jwt"
 )
 
-const tokenHmacSecret = "test" // see config centrifugo.json
-
 var benchmark *Benchmark
-var userID uint64
 var (
 	Reset = "\033[0m"
 	Green = "\033[32m"
@@ -39,7 +35,7 @@ var defaultConfig = map[string]interface{}{
 	"clients_connection_delay_millisecond": 10,
 }
 
-type stressConfig struct {
+type config struct {
 	url          string        // connection URI
 	format       string        // message format
 	channel      string        // channel
@@ -51,7 +47,7 @@ type stressConfig struct {
 	clientsDelay time.Duration // delay before new client connect (millisecond)
 }
 
-func getStressConfig() stressConfig {
+func getConfig() config {
 	for k, v := range defaultConfig {
 		viper.SetDefault(k, v)
 	}
@@ -62,7 +58,7 @@ func getStressConfig() stressConfig {
 		log.Println(err)
 	}
 
-	return stressConfig{
+	return config{
 		url:          viper.GetString("url"),
 		format:       viper.GetString("message_format"),
 		channel:      viper.GetString("channel_name"),
@@ -77,7 +73,7 @@ func getStressConfig() stressConfig {
 
 func main() {
 	log.SetFlags(0)
-	cfg := getStressConfig()
+	cfg := getConfig()
 
 	benchmark = NewBenchmark("Centrifuge", cfg.numSubs, cfg.numPubs)
 
@@ -90,7 +86,7 @@ func main() {
 	startWg.Add(cfg.numSubs)
 	for i := 0; i < cfg.numSubs; i++ {
 		time.Sleep(cfg.clientsDelay)
-		go runStressSubscriber(&startWg, &doneWg, cfg)
+		go runSubscriber(&startWg, &doneWg, cfg)
 	}
 	startWg.Wait()
 
@@ -98,7 +94,7 @@ func main() {
 	startWg.Add(cfg.numPubs)
 	pubCounts := MsgPerClient(cfg.numMsg, cfg.numPubs)
 	for i := 0; i < cfg.numPubs; i++ {
-		go runStressPublisher(&startWg, &doneWg, pubCounts[i], cfg)
+		go runPublisher(&startWg, &doneWg, pubCounts[i], cfg)
 	}
 
 	log.Printf(Green+"Starting benchmark [format=%s, msgs=%d, msgsize=%d, pubs=%d, subs=%d]"+Reset+"\n", cfg.format, cfg.numMsg, cfg.msgSize, cfg.numPubs, cfg.numSubs)
@@ -111,35 +107,8 @@ func main() {
 	fmt.Print(benchmark.Report())
 }
 
-func newConnection(cfg stressConfig) *centrifuge.Client {
-	var c *centrifuge.Client
-	if cfg.format == "protobuf" {
-		c = centrifuge.NewProtobufClient(cfg.url, centrifuge.DefaultConfig())
-	} else {
-		c = centrifuge.NewJsonClient(cfg.url, centrifuge.DefaultConfig())
-	}
-
-	id := atomic.AddUint64(&userID, 1)
-	c.SetToken(connToken(strconv.FormatUint(id, 10), 0))
-
-	events := &stressEventHandler{}
-	c.OnError(events)
-	c.OnDisconnect(events)
-	return c
-}
-
-type stressEventHandler struct{}
-
-func (h *stressEventHandler) OnError(_ *centrifuge.Client, _ centrifuge.ErrorEvent) {}
-
-func (h *stressEventHandler) OnDisconnect(_ *centrifuge.Client, e centrifuge.DisconnectEvent) {
-	if e.Reason != "clean disconnect" {
-		log.Printf("disconnect: %s", e.Reason)
-	}
-}
-
-func runStressPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg stressConfig) {
-	c := newConnection(cfg)
+func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
+	c := common.NewConnection(cfg.url, cfg.format)
 	defer func() { _ = c.Close() }()
 
 	var msg []byte
@@ -197,8 +166,8 @@ func (h *subEventHandler) OnSubscribeError(_ *centrifuge.Subscription, e centrif
 	log.Fatalf("subscribe error: %v", e.Error)
 }
 
-func runStressSubscriber(startWg, doneWg *sync.WaitGroup, cfg stressConfig) {
-	c := newConnection(cfg)
+func runSubscriber(startWg, doneWg *sync.WaitGroup, cfg config) {
+	c := common.NewConnection(cfg.url, cfg.format)
 	subEvents := &subEventHandler{
 		numMsg:  cfg.numMsg,
 		msgSize: cfg.msgSize,
@@ -539,18 +508,4 @@ func MsgPerClient(numMsg, numClients int) []int {
 		counts[i]++
 	}
 	return counts
-}
-
-func connToken(user string, exp int64) string {
-	// NOTE that JWT must be generated on backend side of your application!
-	// Here we are generating it on client side only for example simplicity.
-	claims := jwt.MapClaims{"sub": user}
-	if exp > 0 {
-		claims["exp"] = exp
-	}
-	t, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(tokenHmacSecret))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return t
 }
