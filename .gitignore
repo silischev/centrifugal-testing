@@ -16,4 +16,5 @@
 
 .idea
 .env
+test_conf.json
 telegraf.conf

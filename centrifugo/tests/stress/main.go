@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/FZambia/viper-lite"
 	"github.com/centrifugal/centrifuge-go"
 	"github.com/golang-jwt/jwt"
 )
@@ -27,7 +27,19 @@ var (
 	Cyan  = "\033[36m"
 )
 
-type config struct {
+var defaultConfig = map[string]interface{}{
+	"url":                                  "ws://centrifugo:8000/connection/websocket",
+	"message_format":                       "json",
+	"channel_name":                         "channel",
+	"publishers_number":                    1,
+	"subscribers_number":                   0,
+	"publish_messages_number":              10000,
+	"message_size":                         128,
+	"publish_delay_millisecond":            1,
+	"clients_connection_delay_millisecond": 10,
+}
+
+type stressConfig struct {
 	url          string        // connection URI
 	format       string        // message format
 	channel      string        // channel
@@ -39,60 +51,34 @@ type config struct {
 	clientsDelay time.Duration // delay before new client connect (millisecond)
 }
 
-func getConfig() config {
-	url := os.Getenv("URL")
-	if len(url) == 0 {
-		url = "ws://localhost:8000/connection/websocket"
+func getStressConfig() stressConfig {
+	for k, v := range defaultConfig {
+		viper.SetDefault(k, v)
 	}
 
-	format := os.Getenv("MESSAGE_FORMAT")
-	if len(format) == 0 {
-		format = "json"
+	viper.SetConfigFile("/tests/stress/test_conf.json")
+	err := viper.ReadInConfig()
+	if err != nil {
+		log.Println(err)
 	}
 
-	channel := os.Getenv("CHANNEL_NAME")
-	if len(channel) == 0 {
-		channel = "channel"
-	}
-
-	numPubs, _ := strconv.Atoi(os.Getenv("PUBLISHERS_NUMBER"))
-	if numPubs <= 0 {
-		numPubs = 1
-	}
-
-	numSubs, _ := strconv.Atoi(os.Getenv("SUBSCRIBERS_NUMBER"))
-	if numSubs <= 0 {
-		numSubs = 0
-	}
-
-	numMsg, _ := strconv.Atoi(os.Getenv("PUBLISH_MESSAGES_NUMBER"))
-	if numMsg <= 0 {
-		numMsg = 100000
-	}
-
-	msgSize, _ := strconv.Atoi(os.Getenv("MESSAGE_SIZE"))
-	if msgSize <= 0 {
-		msgSize = 128
-	}
-
-	pubDelay, _ := strconv.Atoi(os.Getenv("PUBLISH_DELAY_MILLISECOND"))
-	connDelay, _ := strconv.Atoi(os.Getenv("CLIENTS_CONNECTION_DELAY_MILLISECOND"))
-
-	return config{
-		url:          url,
-		format:       format,
-		channel:      channel,
-		numPubs:      numPubs,
-		numSubs:      numSubs,
-		numMsg:       numMsg,
-		publishDelay: time.Duration(pubDelay) * time.Millisecond,
-		clientsDelay: time.Duration(connDelay) * time.Millisecond,
+	return stressConfig{
+		url:          viper.GetString("url"),
+		format:       viper.GetString("message_format"),
+		channel:      viper.GetString("channel_name"),
+		numPubs:      viper.GetInt("publishers_number"),
+		numSubs:      viper.GetInt("subscribers_number"),
+		numMsg:       viper.GetInt("publish_messages_number"),
+		msgSize:      viper.GetInt("message_size"),
+		publishDelay: viper.GetDuration("publish_delay_millisecond") * time.Millisecond,
+		clientsDelay: viper.GetDuration("clients_connection_delay_millisecond") * time.Millisecond,
 	}
 }
 
 func main() {
 	log.SetFlags(0)
-	cfg := getConfig()
+	cfg := getStressConfig()
+
 	benchmark = NewBenchmark("Centrifuge", cfg.numSubs, cfg.numPubs)
 
 	var startWg sync.WaitGroup
@@ -104,7 +90,7 @@ func main() {
 	startWg.Add(cfg.numSubs)
 	for i := 0; i < cfg.numSubs; i++ {
 		time.Sleep(cfg.clientsDelay)
-		go runSubscriber(&startWg, &doneWg, cfg)
+		go runStressSubscriber(&startWg, &doneWg, cfg)
 	}
 	startWg.Wait()
 
@@ -112,7 +98,7 @@ func main() {
 	startWg.Add(cfg.numPubs)
 	pubCounts := MsgPerClient(cfg.numMsg, cfg.numPubs)
 	for i := 0; i < cfg.numPubs; i++ {
-		go runPublisher(&startWg, &doneWg, pubCounts[i], cfg)
+		go runStressPublisher(&startWg, &doneWg, pubCounts[i], cfg)
 	}
 
 	log.Printf(Green+"Starting benchmark [format=%s, msgs=%d, msgsize=%d, pubs=%d, subs=%d]"+Reset+"\n", cfg.format, cfg.numMsg, cfg.msgSize, cfg.numPubs, cfg.numSubs)
@@ -125,7 +111,7 @@ func main() {
 	fmt.Print(benchmark.Report())
 }
 
-func newConnection(cfg config) *centrifuge.Client {
+func newConnection(cfg stressConfig) *centrifuge.Client {
 	var c *centrifuge.Client
 	if cfg.format == "protobuf" {
 		c = centrifuge.NewProtobufClient(cfg.url, centrifuge.DefaultConfig())
@@ -136,23 +122,23 @@ func newConnection(cfg config) *centrifuge.Client {
 	id := atomic.AddUint64(&userID, 1)
 	c.SetToken(connToken(strconv.FormatUint(id, 10), 0))
 
-	events := &eventHandler{}
+	events := &stressEventHandler{}
 	c.OnError(events)
 	c.OnDisconnect(events)
 	return c
 }
 
-type eventHandler struct{}
+type stressEventHandler struct{}
 
-func (h *eventHandler) OnError(_ *centrifuge.Client, _ centrifuge.ErrorEvent) {}
+func (h *stressEventHandler) OnError(_ *centrifuge.Client, _ centrifuge.ErrorEvent) {}
 
-func (h *eventHandler) OnDisconnect(_ *centrifuge.Client, e centrifuge.DisconnectEvent) {
+func (h *stressEventHandler) OnDisconnect(_ *centrifuge.Client, e centrifuge.DisconnectEvent) {
 	if e.Reason != "clean disconnect" {
 		log.Printf("disconnect: %s", e.Reason)
 	}
 }
 
-func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
+func runStressPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg stressConfig) {
 	c := newConnection(cfg)
 	defer func() { _ = c.Close() }()
 
@@ -211,7 +197,7 @@ func (h *subEventHandler) OnSubscribeError(_ *centrifuge.Subscription, e centrif
 	log.Fatalf("subscribe error: %v", e.Error)
 }
 
-func runSubscriber(startWg, doneWg *sync.WaitGroup, cfg config) {
+func runStressSubscriber(startWg, doneWg *sync.WaitGroup, cfg stressConfig) {
 	c := newConnection(cfg)
 	subEvents := &subEventHandler{
 		numMsg:  cfg.numMsg,

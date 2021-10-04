@@ -1,0 +1,11 @@
+{
+  "url": "ws://centrifugo:8000/connection/websocket",
+  "message_format": "json",
+  "channel_name": "channel",
+  "publishers_number": 4,
+  "subscribers_number": 100,
+  "publish_messages_number": 10000,
+  "message_size": 128,
+  "publish_delay_millisecond": 1,
+  "clients_connection_delay_millisecond": 10
+}

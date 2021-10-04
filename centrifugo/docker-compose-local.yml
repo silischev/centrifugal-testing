@@ -6,8 +6,6 @@ services:
     container_name: tests
     volumes:
       - ./tests:/tests:delegated
-    env_file:
-      - .env
     tty: true
     depends_on:
       - centrifugo
