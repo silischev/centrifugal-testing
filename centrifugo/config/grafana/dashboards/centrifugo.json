@@ -22,7 +22,7 @@
   "editable": true,
   "gnetId": 13039,
   "graphTooltip": 0,
-  "iteration": 1633117530745,
+  "iteration": 1633425840915,
   "links": [],
   "panels": [
     {
@@ -32,6 +32,214 @@
         "w": 24,
         "x": 0,
         "y": 0
+      },
+      "id": 78,
+      "title": "Centrifugo live test",
+      "type": "row"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 80,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(increase(err_count{job=\"custom\", quantile=\"$quantile\", instance=~\"$instance\"}[1m])) by (action)",
+          "interval": "",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum(round(rate(err_count{job=\"custom\", quantile=\"$quantile\", instance=~\"$instance\"}[2m])*60)) by (action)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "{{action}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Errors",
+      "type": "timeseries"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 7,
+        "x": 6,
+        "y": 1
+      },
+      "hiddenSeries": false,
+      "id": 82,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "histogram_quantile(0.99, sum(rate(publish_req_duration_ms_bucket{job=\"custom\"}[1m])) by (action))",
+          "hide": true,
+          "interval": "",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "histogram_quantile(0.99, sum(rate(publish_req_duration_ms_bucket[1m])) by (action))",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "{{action}}",
+          "refId": "B"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum(rate(publish_req_duration_ms_bucket{}[1m])) by (action)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "{{action}}",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Publish duration",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
       },
       "id": 68,
       "title": "Centrifugo",
@@ -43,7 +251,7 @@
         "h": 5,
         "w": 3,
         "x": 0,
-        "y": 1
+        "y": 9
       },
       "id": 38,
       "options": {
@@ -82,7 +290,7 @@
         "h": 5,
         "w": 5,
         "x": 3,
-        "y": 1
+        "y": 9
       },
       "id": 42,
       "options": {
@@ -144,7 +352,7 @@
         "h": 5,
         "w": 10,
         "x": 8,
-        "y": 1
+        "y": 9
       },
       "id": 12,
       "options": {
@@ -212,7 +420,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 1
+        "y": 9
       },
       "id": 14,
       "options": {
@@ -257,7 +465,7 @@
         "h": 7,
         "w": 13,
         "x": 0,
-        "y": 6
+        "y": 14
       },
       "hiddenSeries": false,
       "id": 16,
@@ -352,7 +560,7 @@
         "h": 7,
         "w": 11,
         "x": 13,
-        "y": 6
+        "y": 14
       },
       "hiddenSeries": false,
       "id": 10,
@@ -382,6 +590,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "avg(centrifugo_client_command_duration_seconds{quantile=\"$quantile\", instance=~\"$instance\"}) by (method)",
           "interval": "",
           "legendFormat": "{{method}}",
@@ -443,7 +652,7 @@
         "h": 7,
         "w": 13,
         "x": 0,
-        "y": 13
+        "y": 21
       },
       "hiddenSeries": false,
       "id": 18,
@@ -538,7 +747,7 @@
         "h": 7,
         "w": 11,
         "x": 13,
-        "y": 13
+        "y": 21
       },
       "hiddenSeries": false,
       "id": 8,
@@ -630,7 +839,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 20
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 2,
@@ -722,7 +931,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 20
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 4,
@@ -813,7 +1022,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 20
+        "y": 28
       },
       "hiddenSeries": false,
       "id": 6,
@@ -948,7 +1157,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 20
+        "y": 28
       },
       "id": 76,
       "options": {
@@ -985,7 +1194,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 28
+        "y": 36
       },
       "hiddenSeries": false,
       "id": 50,
@@ -1076,7 +1285,7 @@
         "h": 6,
         "w": 6,
         "x": 6,
-        "y": 28
+        "y": 36
       },
       "hiddenSeries": false,
       "id": 48,
@@ -1167,7 +1376,7 @@
         "h": 6,
         "w": 6,
         "x": 12,
-        "y": 28
+        "y": 36
       },
       "hiddenSeries": false,
       "id": 46,
@@ -1258,7 +1467,7 @@
         "h": 6,
         "w": 6,
         "x": 18,
-        "y": 28
+        "y": 36
       },
       "hiddenSeries": false,
       "id": 52,
@@ -1349,7 +1558,7 @@
         "h": 8,
         "w": 10,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "hiddenSeries": false,
       "id": 20,
@@ -1444,7 +1653,7 @@
         "h": 8,
         "w": 14,
         "x": 10,
-        "y": 34
+        "y": 42
       },
       "hiddenSeries": false,
       "id": 22,
@@ -1539,7 +1748,7 @@
         "h": 7,
         "w": 9,
         "x": 0,
-        "y": 42
+        "y": 50
       },
       "hiddenSeries": false,
       "id": 54,
@@ -1634,7 +1843,7 @@
         "h": 7,
         "w": 7,
         "x": 9,
-        "y": 42
+        "y": 50
       },
       "hiddenSeries": false,
       "id": 58,
@@ -1668,6 +1877,7 @@
       "steppedLine": false,
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(round(rate(centrifugo_proxy_errors{instance=~\"$instance\"}[2m])*60)) by (protocol, type)",
           "interval": "",
           "legendFormat": "{{protocol}}://{{type}}",
@@ -1729,7 +1939,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 42
+        "y": 50
       },
       "hiddenSeries": false,
       "id": 56,
@@ -1815,7 +2025,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 57
       },
       "id": 70,
       "panels": [],
@@ -1834,7 +2044,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 28,
@@ -1931,7 +2141,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 58
       },
       "hiddenSeries": false,
       "id": 30,
@@ -2021,7 +2231,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "id": 72,
       "panels": [],
@@ -2040,7 +2250,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "hiddenSeries": false,
       "id": 34,
@@ -2138,7 +2348,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 65
       },
       "hiddenSeries": false,
       "id": 36,
@@ -2229,7 +2439,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 40,
@@ -2320,7 +2530,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 72
       },
       "hiddenSeries": false,
       "id": 44,
@@ -2406,7 +2616,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 74,
       "panels": [],
@@ -2431,7 +2641,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 72
+        "y": 80
       },
       "hiddenSeries": false,
       "id": 60,
@@ -2531,7 +2741,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 72
+        "y": 80
       },
       "hiddenSeries": false,
       "id": 62,
@@ -2645,7 +2855,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 80
+        "y": 88
       },
       "hiddenSeries": false,
       "id": 64,
@@ -2751,7 +2961,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 80
+        "y": 88
       },
       "hiddenSeries": false,
       "id": 66,

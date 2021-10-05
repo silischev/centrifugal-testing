@@ -2,5 +2,10 @@
   "url": "ws://centrifugo:8000/connection/websocket",
   "message_format": "json",
   "clients_connections_number": 10050,
-  "subscriber_delay_millisecond": 50
+  "subscriber_delay_millisecond": 50,
+  "personal_publisher_slow_delay_millisecond": 60000,
+  "personal_publisher_fast_delay_millisecond": 100,
+  "group_publisher_slow_delay_millisecond": 60000,
+  "group_publisher_fast_delay_millisecond": 100,
+  "publishing_delay_second": 1800
 }

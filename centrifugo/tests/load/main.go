@@ -11,9 +11,13 @@ import (
 	"tests/common"
 	"time"
 
-	"github.com/FZambia/viper-lite"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/FZambia/viper-lite"
 	"github.com/centrifugal/centrifuge-go"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -28,11 +32,28 @@ func init() {
 }
 
 var defaultConfig = map[string]interface{}{
-	"url":                              "ws://centrifugo:8000/connection/websocket",
-	"message_format":                   "json",
-	"clients_connections_number":       10050,
-	"add_subscriber_delay_millisecond": 50,
+	"url":                          "ws://centrifugo:8000/connection/websocket",
+	"message_format":               "json",
+	"clients_connections_number":   10050,
+	"subscriber_delay_millisecond": 50,
+	"personal_publisher_slow_delay_millisecond": 60000,
+	"personal_publisher_fast_delay_millisecond": 100,
+	"group_publisher_slow_delay_millisecond":    60000,
+	"group_publisher_fast_delay_millisecond":    100,
+	"publishing_delay_second":                   1800,
 }
+
+var publishDuration = promauto.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "publish_req_duration_ms",
+		Buckets: []float64{1, 3, 5, 7, 10, 12, 15, 17, 20, 25, 30},
+	},
+	[]string{"action"},
+)
+
+var errCount = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "err_count",
+}, []string{"action"})
 
 type config struct {
 	url                        string        // connection URI
@@ -46,7 +67,7 @@ type config struct {
 	publishingDelay            time.Duration // delay after start slow publishers (second)
 }
 
-func getConfig() config {
+func newConfig() config {
 	for k, v := range defaultConfig {
 		viper.SetDefault(k, v)
 	}
@@ -81,16 +102,21 @@ func (h *pubEventHandler) OnPublish(sub *centrifuge.Subscription, e centrifuge.P
 		return
 	}
 
-	// @TODO
 	if message.Host != host {
 		// Only measure latency for messages born in this process.
 		return
 	}
-	//statsdClient.Timing(fmt.Sprintf("messages_received.%s.latency", h.Channel), (time.Now().UnixNano()-message.Time)/1000/1000)
+
+	publishDuration.WithLabelValues("publish").Observe(float64(time.Now().UnixNano() - message.Time))
 }
 
 func main() {
-	cfg := getConfig()
+	cfg := newConfig()
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		log.Fatalln(http.ListenAndServe(":8082", nil))
+	}()
 
 	go func() {
 		for i := 0; i < cfg.numClients; i++ {
@@ -228,7 +254,7 @@ func runPersonalPublisher(cfg config, sleep time.Duration) *centrifuge.Client {
 			data, _ := json.Marshal(message)
 			_, err := client.Publish(personalChannel(cfg.numClients), data)
 			if err != nil {
-				//statsdClient.Increment("publish.personal_channel.error")
+				errCount.WithLabelValues("publish_personal_channel").Inc()
 			}
 		}
 	}()
@@ -254,7 +280,7 @@ func runGroupPublisher(cfg config, sleep time.Duration) *centrifuge.Client {
 			data, _ := json.Marshal(message)
 			_, err := client.Publish(groupChannel(cfg.numClients), data)
 			if err != nil {
-				//statsdClient.Increment("publish.group_channel.error")
+				errCount.WithLabelValues("publish_group_channel").Inc()
 			}
 		}
 	}()
