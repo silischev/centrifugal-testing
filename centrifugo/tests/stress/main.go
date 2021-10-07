@@ -6,26 +6,34 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
+	"tests/common"
 	"time"
 
+	"github.com/FZambia/viper-lite"
 	"github.com/centrifugal/centrifuge-go"
-	"github.com/golang-jwt/jwt"
 )
 
-const tokenHmacSecret = "test" // see config centrifugo.json
-
 var benchmark *Benchmark
-var userID uint64
 var (
 	Reset = "\033[0m"
 	Green = "\033[32m"
 	Blue  = "\033[34m"
 	Cyan  = "\033[36m"
 )
+
+var defaultConfig = map[string]interface{}{
+	"url":                                  "ws://centrifugo:8000/connection/websocket",
+	"message_format":                       "json",
+	"channel_name":                         "channel",
+	"publishers_number":                    1,
+	"subscribers_number":                   0,
+	"publish_messages_number":              10000,
+	"message_size":                         128,
+	"publish_delay_millisecond":            1,
+	"clients_connection_delay_millisecond": 10,
+}
 
 type config struct {
 	url          string        // connection URI
@@ -40,59 +48,33 @@ type config struct {
 }
 
 func getConfig() config {
-	url := os.Getenv("URL")
-	if len(url) == 0 {
-		url = "ws://localhost:8000/connection/websocket"
+	for k, v := range defaultConfig {
+		viper.SetDefault(k, v)
 	}
 
-	format := os.Getenv("MESSAGE_FORMAT")
-	if len(format) == 0 {
-		format = "json"
+	viper.SetConfigFile("/tests/stress/test_conf.json")
+	err := viper.ReadInConfig()
+	if err != nil {
+		log.Println(err)
 	}
-
-	channel := os.Getenv("CHANNEL_NAME")
-	if len(channel) == 0 {
-		channel = "channel"
-	}
-
-	numPubs, _ := strconv.Atoi(os.Getenv("PUBLISHERS_NUMBER"))
-	if numPubs <= 0 {
-		numPubs = 1
-	}
-
-	numSubs, _ := strconv.Atoi(os.Getenv("SUBSCRIBERS_NUMBER"))
-	if numSubs <= 0 {
-		numSubs = 0
-	}
-
-	numMsg, _ := strconv.Atoi(os.Getenv("PUBLISH_MESSAGES_NUMBER"))
-	if numMsg <= 0 {
-		numMsg = 100000
-	}
-
-	msgSize, _ := strconv.Atoi(os.Getenv("MESSAGE_SIZE"))
-	if msgSize <= 0 {
-		msgSize = 128
-	}
-
-	pubDelay, _ := strconv.Atoi(os.Getenv("PUBLISH_DELAY_MILLISECOND"))
-	connDelay, _ := strconv.Atoi(os.Getenv("CLIENTS_CONNECTION_DELAY_MILLISECOND"))
 
 	return config{
-		url:          url,
-		format:       format,
-		channel:      channel,
-		numPubs:      numPubs,
-		numSubs:      numSubs,
-		numMsg:       numMsg,
-		publishDelay: time.Duration(pubDelay) * time.Millisecond,
-		clientsDelay: time.Duration(connDelay) * time.Millisecond,
+		url:          viper.GetString("url"),
+		format:       viper.GetString("message_format"),
+		channel:      viper.GetString("channel_name"),
+		numPubs:      viper.GetInt("publishers_number"),
+		numSubs:      viper.GetInt("subscribers_number"),
+		numMsg:       viper.GetInt("publish_messages_number"),
+		msgSize:      viper.GetInt("message_size"),
+		publishDelay: viper.GetDuration("publish_delay_millisecond") * time.Millisecond,
+		clientsDelay: viper.GetDuration("clients_connection_delay_millisecond") * time.Millisecond,
 	}
 }
 
 func main() {
 	log.SetFlags(0)
 	cfg := getConfig()
+
 	benchmark = NewBenchmark("Centrifuge", cfg.numSubs, cfg.numPubs)
 
 	var startWg sync.WaitGroup
@@ -125,35 +107,8 @@ func main() {
 	fmt.Print(benchmark.Report())
 }
 
-func newConnection(cfg config) *centrifuge.Client {
-	var c *centrifuge.Client
-	if cfg.format == "protobuf" {
-		c = centrifuge.NewProtobufClient(cfg.url, centrifuge.DefaultConfig())
-	} else {
-		c = centrifuge.NewJsonClient(cfg.url, centrifuge.DefaultConfig())
-	}
-
-	id := atomic.AddUint64(&userID, 1)
-	c.SetToken(connToken(strconv.FormatUint(id, 10), 0))
-
-	events := &eventHandler{}
-	c.OnError(events)
-	c.OnDisconnect(events)
-	return c
-}
-
-type eventHandler struct{}
-
-func (h *eventHandler) OnError(_ *centrifuge.Client, _ centrifuge.ErrorEvent) {}
-
-func (h *eventHandler) OnDisconnect(_ *centrifuge.Client, e centrifuge.DisconnectEvent) {
-	if e.Reason != "clean disconnect" {
-		log.Printf("disconnect: %s", e.Reason)
-	}
-}
-
 func runPublisher(startWg, doneWg *sync.WaitGroup, numMsg int, cfg config) {
-	c := newConnection(cfg)
+	c := common.NewConnection(cfg.url, cfg.format)
 	defer func() { _ = c.Close() }()
 
 	var msg []byte
@@ -212,7 +167,7 @@ func (h *subEventHandler) OnSubscribeError(_ *centrifuge.Subscription, e centrif
 }
 
 func runSubscriber(startWg, doneWg *sync.WaitGroup, cfg config) {
-	c := newConnection(cfg)
+	c := common.NewConnection(cfg.url, cfg.format)
 	subEvents := &subEventHandler{
 		numMsg:  cfg.numMsg,
 		msgSize: cfg.msgSize,
@@ -553,18 +508,4 @@ func MsgPerClient(numMsg, numClients int) []int {
 		counts[i]++
 	}
 	return counts
-}
-
-func connToken(user string, exp int64) string {
-	// NOTE that JWT must be generated on backend side of your application!
-	// Here we are generating it on client side only for example simplicity.
-	claims := jwt.MapClaims{"sub": user}
-	if exp > 0 {
-		claims["exp"] = exp
-	}
-	t, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(tokenHmacSecret))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return t
 }

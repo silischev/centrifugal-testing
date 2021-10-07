@@ -12,3 +12,8 @@ scrape_configs:
     static_configs:
       - targets:
           - cadvisor:8080
+  - job_name: custom
+    scrape_interval: 2s
+    static_configs:
+      - targets:
+          - host.docker.internal:8082

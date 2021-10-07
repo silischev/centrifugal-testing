@@ -1,24 +1,28 @@
-package load
+package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"strconv"
-	"strings"
-	"sync"
-	"syscall"
+	"tests/common"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/FZambia/viper-lite"
 	"github.com/centrifugal/centrifuge-go"
-	"gopkg.in/alexcesaro/statsd.v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-const numClientConnections = 10050
+const (
+	replicas = 1
+)
 
 var host string
 
@@ -27,61 +31,98 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-var statsdClient *statsd.Client
+var defaultConfig = map[string]interface{}{
+	"url":                          "ws://centrifugo:8000/connection/websocket",
+	"message_format":               "json",
+	"clients_connections_number":   10050,
+	"subscriber_delay_millisecond": 50,
+	"personal_publisher_slow_delay_millisecond": 60000,
+	"personal_publisher_fast_delay_millisecond": 100,
+	"group_publisher_slow_delay_millisecond":    60000,
+	"group_publisher_fast_delay_millisecond":    100,
+	"publishing_delay_second":                   1800,
+}
 
-type eventHandler struct {
+var publishDuration = promauto.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "publish_req_duration_ms",
+		Buckets: []float64{1, 3, 5, 7, 10, 12, 15, 17, 20, 25, 30},
+	},
+	[]string{"action"},
+)
+
+var errCount = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "err_count",
+}, []string{"action"})
+
+type config struct {
+	url                        string        // connection URI
+	format                     string        // message format
+	numClients                 int           // number of clients connections
+	subscriberDelay            time.Duration // delay before adding new subscriber (millisecond)
+	personalPublisherSlowDelay time.Duration // delay before adding new slow personal publisher (millisecond)
+	personalPublisherFastDelay time.Duration // delay before adding new fast personal publisher (millisecond)
+	groupPublisherSlowDelay    time.Duration // delay before adding new slow group publisher (millisecond)
+	groupPublisherFastDelay    time.Duration // delay before adding new fast group publisher (millisecond)
+	publishingDelay            time.Duration // delay after start slow publishers (second)
+}
+
+func newConfig() config {
+	for k, v := range defaultConfig {
+		viper.SetDefault(k, v)
+	}
+
+	viper.SetConfigFile("/tests/load/test_conf.json")
+	err := viper.ReadInConfig()
+	if err != nil {
+		log.Println(err)
+	}
+
+	return config{
+		url:                        viper.GetString("url"),
+		format:                     viper.GetString("message_format"),
+		numClients:                 viper.GetInt("clients_connections_number"),
+		subscriberDelay:            viper.GetDuration("subscriber_delay_millisecond") * time.Millisecond,
+		personalPublisherSlowDelay: viper.GetDuration("personal_publisher_slow_delay_millisecond") * time.Millisecond,
+		personalPublisherFastDelay: viper.GetDuration("personal_publisher_fast_delay_millisecond") * time.Millisecond,
+		groupPublisherSlowDelay:    viper.GetDuration("group_publisher_slow_delay_millisecond") * time.Millisecond,
+		groupPublisherFastDelay:    viper.GetDuration("group_publisher_fast_delay_millisecond") * time.Millisecond,
+		publishingDelay:            viper.GetDuration("publishing_delay_second") * time.Second,
+	}
+}
+
+type pubEventHandler struct {
 	Channel string
 }
 
-func (h *eventHandler) OnPublish(sub *centrifuge.Subscription, e centrifuge.PublishEvent) {
+func (h *pubEventHandler) OnPublish(sub *centrifuge.Subscription, e centrifuge.PublishEvent) {
 	var message Message
 	err := json.Unmarshal(e.Data, &message)
 	if err != nil {
 		return
 	}
-	statsdClient.Increment(fmt.Sprintf("messages_received.%s.total", h.Channel))
+
 	if message.Host != host {
 		// Only measure latency for messages born in this process.
 		return
 	}
-	statsdClient.Timing(fmt.Sprintf("messages_received.%s.latency", h.Channel), (time.Now().UnixNano()-message.Time)/1000/1000)
+
+	publishDuration.WithLabelValues("publish").Observe(float64(time.Now().UnixNano() - message.Time))
 }
 
 func main() {
+	cfg := newConfig()
 
-	cfg := config.NewDefaultConfig()
-	err := cfg.Load(os.Getenv("CONFIG_PATH"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	statsdClient, err = NewStatsd(
-		cfg.Statsd.Host,
-		cfg.Statsd.Port,
-		cfg.Statsd.Protocol,
-		cfg.Statsd.Prefix,
-		cfg.Statsd.Enable,
-	)
-	if err != nil {
-		log.Fatalf("statsd client error: %v", err)
-	}
-
-	url := cfg.URL
-	if url == "" {
-		log.Fatal("no server url provided in config")
-	}
-
-	var clientsMu sync.Mutex
-	clients := []*centrifuge.Client{}
-	numClients := numClientConnections
 	go func() {
-		for i := 0; i < numClients; i++ {
-			time.Sleep(50 * time.Millisecond)
+		http.Handle("/metrics", promhttp.Handler())
+		log.Fatalln(http.ListenAndServe(":8082", nil))
+	}()
+
+	go func() {
+		for i := 0; i < cfg.numClients; i++ {
+			time.Sleep(cfg.subscriberDelay)
 			go func(i int) {
-				client := runSubscriber(cfg, url, i)
-				clientsMu.Lock()
-				clients = append(clients, client)
-				clientsMu.Unlock()
+				runSubscriber(cfg)
 			}(i)
 		}
 	}()
@@ -89,13 +130,13 @@ func main() {
 	go func() {
 		// Run slow publisher from the beginning.
 		go func() {
-			runPersonalPublisher(cfg, url, 60*time.Second)
+			runPersonalPublisher(cfg, cfg.personalPublisherSlowDelay)
 		}()
 		// Then wait to start publishing more.
-		time.Sleep(30 * time.Minute)
+		time.Sleep(cfg.publishingDelay)
 		for i := 0; i < 10; i++ {
 			go func() {
-				runPersonalPublisher(cfg, url, 100*time.Millisecond)
+				runPersonalPublisher(cfg, cfg.personalPublisherFastDelay)
 			}()
 			sleepFor := rand.Intn(60) + 300
 			time.Sleep(time.Duration(sleepFor) * time.Second)
@@ -105,63 +146,63 @@ func main() {
 	go func() {
 		// Run slow publisher from the beginning.
 		go func() {
-			runPersonalPublisher(cfg, url, 60*time.Second)
+			runPersonalPublisher(cfg, cfg.personalPublisherSlowDelay)
 		}()
 		// Then wait to start publishing more.
 		time.Sleep(30 * time.Minute)
 		for i := 0; i < 10; i++ {
 			go func() {
-				runGroupPublisher(cfg, url, 100*time.Millisecond)
+				runGroupPublisher(cfg, cfg.groupPublisherFastDelay)
 			}()
 			sleepFor := rand.Intn(60) + 300
 			time.Sleep(time.Duration(sleepFor) * time.Second)
 		}
 	}()
 
-	http.HandleFunc("/_info", func(rw http.ResponseWriter, r *http.Request) {
-		rw.Write([]byte("ok"))
-	})
-
-	go func() {
-		if err := http.ListenAndServe(":8890", nil); err != nil {
-			panic(err)
-		}
-	}()
-
-	waitExitSignal(clients)
-	fmt.Println("exiting")
+	log.Fatalln(http.ListenAndServe(":8081", nil))
 }
 
-func personalChannel(cfg *config.Config) string {
+func personalChannel(numClients int) string {
 	// While this is not truly "personal" channel as there will be
 	// channel name collisions among maxBenchmarkClients this is ok
 	// for our use case where we really just want a distribution close
 	// to one unique channel per client and a way to publish messages
 	// into personal channels.
-	return "personal" + strconv.Itoa(rand.Intn(numClientConnections*cfg.Replicas*2))
+	return "personal" + strconv.Itoa(rand.Intn(numClients*replicas*2))
 }
 
-func groupChannel() string {
+func groupChannel(numClients int) string {
 	// Each client will be subscribed to group channel. The amount of
 	// subscribers in such group will be close to replica number of
 	// client pods. For example if we have 100 clients pods to generate
 	// maxBenchmarkClients connections then every group channel will
 	// contain about 100 subscribers.
-	return "group" + strconv.Itoa(rand.Intn(numClientConnections*2))
+	return "group" + strconv.Itoa(rand.Intn(numClients*2))
 }
 
-func runSubscriber(cfg *config.Config, url string, num int) *centrifuge.Client {
-	client := centrifuge.New(url, centrifuge.DefaultConfig())
+func runSubscriber(cfg config) *centrifuge.Client {
+	client := common.NewConnection(cfg.url, cfg.format)
 
-	personalSub, _ := client.NewSubscription(personalChannel(cfg))
-	personalSub.OnPublish(&eventHandler{"personal"})
-	personalSub.Subscribe()
+	personalSub, err := client.NewSubscription(personalChannel(cfg.numClients))
+	if err != nil {
+		log.Fatalln(err)
+	}
 
-	groupSub, _ := client.NewSubscription(groupChannel())
-	groupSub.OnPublish(&eventHandler{"group"})
-	groupSub.Subscribe()
+	personalSub.OnPublish(&pubEventHandler{"personal"})
+	_ = personalSub.Subscribe()
 
-	client.Connect()
+	groupSub, err := client.NewSubscription(groupChannel(cfg.numClients))
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	groupSub.OnPublish(&pubEventHandler{"group"})
+	_ = groupSub.Subscribe()
+
+	err = client.Connect()
+	if err != nil {
+		log.Fatalf("Can't connect: %v\n", err)
+	}
 
 	go func() {
 		// Periodically disconnect and connect back.
@@ -170,9 +211,16 @@ func runSubscriber(cfg *config.Config, url string, num int) *centrifuge.Client {
 			max := 10 * 60
 			ttlSeconds := rand.Intn(max-min) + min
 			time.Sleep(time.Duration(ttlSeconds) * time.Second)
-			client.Disconnect()
+			err = client.Disconnect()
+			if err != nil {
+				log.Fatalf("Can't connect: %v\n", err)
+			}
+
 			time.Sleep(time.Second)
-			client.Connect()
+			err = client.Connect()
+			if err != nil {
+				log.Fatalf("Can't connect: %v\n", err)
+			}
 		}
 	}()
 
@@ -187,9 +235,12 @@ type Message struct {
 	Host string `json:"host"`
 }
 
-func runPersonalPublisher(cfg *config.Config, url string, sleep time.Duration) *centrifuge.Client {
-	client := centrifuge.New(url, centrifuge.DefaultConfig())
-	client.Connect()
+func runPersonalPublisher(cfg config, sleep time.Duration) *centrifuge.Client {
+	client := common.NewConnection(cfg.url, cfg.format)
+	err := client.Connect()
+	if err != nil {
+		log.Fatalf("Can't connect: %v\n", err)
+	}
 
 	// Periodically publish messages into channels.
 	go func() {
@@ -201,18 +252,21 @@ func runPersonalPublisher(cfg *config.Config, url string, sleep time.Duration) *
 				Host: host,
 			}
 			data, _ := json.Marshal(message)
-			err := client.Publish(personalChannel(cfg), data)
+			_, err := client.Publish(personalChannel(cfg.numClients), data)
 			if err != nil {
-				statsdClient.Increment("publish.personal_channel.error")
+				errCount.WithLabelValues("publish_personal_channel").Inc()
 			}
 		}
 	}()
 	return client
 }
 
-func runGroupPublisher(cfg *config.Config, url string, sleep time.Duration) *centrifuge.Client {
-	client := centrifuge.New(url, centrifuge.DefaultConfig())
-	client.Connect()
+func runGroupPublisher(cfg config, sleep time.Duration) *centrifuge.Client {
+	client := common.NewConnection(cfg.url, cfg.format)
+	err := client.Connect()
+	if err != nil {
+		log.Fatalf("Can't connect: %v\n", err)
+	}
 
 	// Periodically publish messages into channels.
 	go func() {
@@ -224,53 +278,11 @@ func runGroupPublisher(cfg *config.Config, url string, sleep time.Duration) *cen
 				Host: host,
 			}
 			data, _ := json.Marshal(message)
-			err := client.Publish(groupChannel(), data)
+			_, err := client.Publish(groupChannel(cfg.numClients), data)
 			if err != nil {
-				statsdClient.Increment("publish.group_channel.error")
+				errCount.WithLabelValues("publish_group_channel").Inc()
 			}
 		}
 	}()
 	return client
-}
-
-// NewStatsd возвращает новый настроенный клиент statsd
-func NewStatsd(host string, port int, protocol string, prefix string, enable bool) (*statsd.Client, error) {
-	protocol = strings.ToLower(protocol)
-
-	client, err := statsd.New(
-		statsd.Address(fmt.Sprintf("%v:%v", host, port)),
-		statsd.Prefix(prefix),
-		statsd.Network(protocol),
-		statsd.Mute(!enable))
-
-	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
-func waitExitSignal(clients []*centrifuge.Client) {
-	sigs := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		go func() {
-			time.Sleep(20 * time.Second)
-			os.Exit(1)
-		}()
-		for _, c := range clients {
-			c.Close()
-		}
-		done <- true
-	}()
-	<-done
-}
-
-func prepareForGraphite(s string) string {
-	if s == "" {
-		return "_"
-	}
-	return strings.Replace(s, ".", "_", -1)
 }

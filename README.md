@@ -1,10 +1,16 @@
 # centrifugal-testing
 Load testing and benchmarking centrifugal ecosystem components
 
-### Local running
+### Local running stress test
 ```bash
-cp centrifugo/.env.example centrifugo/.env 
-make run_centrifugo_local
+cp centrifugo/tests/stress/test_conf_example.json centrifugo/tests/stress/test_conf.json
+make run_centrifugo_local_stress
+```
+
+### Local running load test
+```bash
+cp centrifugo/tests/load/test_conf_example.json centrifugo/tests/load/test_conf.json
+make run_centrifugo_local_load
 ```
 
 ### Local running with k6 load testing tool (https://k6.io/docs/)
